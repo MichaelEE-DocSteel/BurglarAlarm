@@ -110,7 +110,7 @@ elseif refreshOption == 2
 
 
 elseif refreshOption == 3
-    personNumber = userTable(end, 1);
+    personNumber = userTable(end, 2).Var2(1)
 
     folderToDelete = fullfile(targetDirectory, ['Person' num2str(personNumber)]);
     if exist(folderToDelete, 'dir')
@@ -175,6 +175,8 @@ captureNumber = 0;
 isDone = false;
 getAnother = true;
 
+BurglarAlarmApp;
+
 %%% START: Auto-capture/detect/train!!!
 RGBFrame = snapshot(vidObj);
 frameSize = size(RGBFrame);
@@ -220,6 +222,8 @@ figure(fdrFig)
 %     h(i) = text(0,0,'','Color','red','FontSize',28);
 %     g(i) = plot(1,1,'r');
 % end
+
+
 
 while double(get(fdrFig,'currentCharacter')) ~= 27 && ~isDone
     
