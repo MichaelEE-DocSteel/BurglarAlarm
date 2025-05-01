@@ -11,8 +11,8 @@ class Webcam {
 
     // Call once in loop() to handle face auth
     bool awaitFaceRecognition() {
-      if (enabled) {
-        return true;  // Already unlocked
+      if (!enabled) {
+        return false;  // Already locked
       }
 
       if (Serial.available() > 0) {
@@ -213,10 +213,13 @@ class MainSession {
 
     // Function to display car details
     bool readSensors() {
-        if (isActivated == false) {
+        if (isActivated == true && isDeactivated == false) {
 
           //Read Sensors      
-          return windowSensor.readSensorState();
+          return !windowSensor.readSensorState();
+        }
+        else {
+          return false;
         }
     }
 
@@ -225,7 +228,7 @@ class MainSession {
     }
 
     void triggerAlarmProcedure() {
-        isActivated = false;
+        isActivated = true;
         isDeactivated = false;
         isTriggered = true;
 
@@ -278,19 +281,19 @@ class MainSession {
     }
 
     void readPin() {
+      delay(250);
+      if (Serial.available() > 0) {
+        String receivedPIN = Serial.readStringUntil('\n');
+        receivedPIN.trim(); // remove newline and spaces
 
-    if (Serial.available() > 0) {
-      String receivedPIN = Serial.readStringUntil('\n');
-      receivedPIN.trim(); // remove newline and spaces
-
-      if (receivedPIN == correctPIN) {
-        Serial.println("ACCESS GRANTED");
-        digitalWrite(LED_BUILTIN, HIGH); // Turn on LED
-      } else {
-        Serial.println("ACCESS DENIED");
-        digitalWrite(LED_BUILTIN, LOW);  // Turn off LED
+        if (receivedPIN == correctPIN) {
+          Serial.println("ACCESS GRANTED");
+          digitalWrite(LED_BUILTIN, HIGH); // Turn on LED
+        } else {
+          Serial.println("ACCESS DENIED");
+          digitalWrite(LED_BUILTIN, LOW);  // Turn off LED
+        }
       }
-    }
   }
 
   
@@ -314,13 +317,7 @@ void loop() {
     bool messageReceived = false;
 
     while (millis() - startTime < 60000) { // 60,000 ms = 60 seconds      
-      if (Serial.available()) {
-        String input = Serial.readStringUntil('\n');
-        input.trim();
-        Serial.println("Serial message received: " + input);
-        messageReceived = true;
-        break;
-      }
+        alarmSession.readPin();
     }
 
     alarmSession.activateAllSensors();   
@@ -328,9 +325,13 @@ void loop() {
   else {
     if (alarmSession.readSensors()) {
       alarmSession.triggerAlarmProcedure();
+      delay(250);  // optional throttle
     }
     else {
       alarmSession.endAlarmProcedure();
+      delay(250);  // optional throttle
+      alarmSession.activateAllSensors();
+      delay(250);  // optional throttle   
     }  
   }
 
