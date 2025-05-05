@@ -11,9 +11,6 @@ class Webcam {
 
     // Call once in loop() to handle face auth
     bool awaitFaceRecognition() {
-      if (!enabled) {
-        return false;  // Already locked
-      }
 
       if (Serial.available() > 0) {
         String msg = Serial.readStringUntil('\n');
@@ -21,11 +18,14 @@ class Webcam {
 
         if (msg == "FACE_OK") {
           enabled = true;
-          Serial.println("Face verified.");
           return true;
-        } else {
+        } else if (msg == "FACE_NOTOK") {
           faceAttempts++;
-          Serial.println("Face not verified.");
+          enabled = false;
+          return false;
+        } 
+        else {
+          return false;
         }
       }
 
@@ -199,16 +199,19 @@ class MainSession {
     Buzzer myBuzzer;
     SolenoidLock myLock;
     LED leds[3];
-    Sensor windowSensor;
+    Sensor doorSensor;
+    Sensor motionSensor;
     Webcam myWebcam;
 
   public:
     int loggedUserID;
 
-    MainSession() : myWebcam(), myBuzzer("MainBuzzer", 13), myLock("DoorLock", 8), leds{ LED("LED1", 51), LED("LED2", 49), LED("LED3", 47)}, windowSensor("window", 2) {
+    MainSession() : myWebcam(), myBuzzer("MainBuzzer", 13), myLock("DoorLock", 8), leds{ LED("LED1", 51), LED("LED2", 49), LED("LED3", 47)}, doorSensor("window", 2), motionSensor("window", 30) {
         isActivated = true;
         isDeactivated = false;
         isTriggered = false;
+
+        correctPIN = "1234";
     }
 
     // Function to display car details
@@ -216,7 +219,7 @@ class MainSession {
         if (isActivated == true && isDeactivated == false) {
 
           //Read Sensors      
-          return !windowSensor.readSensorState();
+          return (motionSensor.readSensorState() || !doorSensor.readSensorState());
         }
         else {
           return false;
@@ -233,12 +236,32 @@ class MainSession {
         isTriggered = true;
 
         myBuzzer.playBuzzer();
-        myLock.Lock();
+        myLock.Unlock();
         for (int i = 0; i < 3; i++) {
           leds[i].turnOn();   // Turn current LED on
         }
 
         Serial.println("ALARM_TRIGGERED");
+
+        unsigned long startTime = millis();
+        bool pinEntered = false;
+
+        // Run this loop for 10 seconds
+        while (!pinEntered & (millis() - startTime < 20000)) {
+            // Check for incoming serial data
+              pinEntered = readPin();              
+
+            if (millis() - startTime > 10000) {
+                myBuzzer.endBuzzer();  // Turn off buzzer after5s or upon PIN entry
+            }
+
+            // Do other non-blocking tasks if needed
+            delay(10);  // Optional short delay to prevent CPU overload
+        }        
+
+        endAlarmProcedure();
+
+        activateAllSensors();
     }
 
     void endAlarmProcedure() {
@@ -247,7 +270,7 @@ class MainSession {
         isTriggered = false;
 
         myBuzzer.endBuzzer();
-        myLock.Unlock();
+        myLock.Lock();
         for (int i = 0; i < 3; i++) {
           leds[i].turnOff();  // Then turn it off before moving to the next
         }
@@ -261,6 +284,8 @@ class MainSession {
         isDeactivated = true;
         isTriggered = false;
 
+        myLock.Unlock(); //Unlock Solenoid (since endAlarmProcedure locks it)
+
         Serial.println("ALARM_DEACTIVATED");
     }
 
@@ -269,7 +294,13 @@ class MainSession {
         isDeactivated = false;
         isTriggered = false;
 
+        myLock.Lock(); //Unlock Solenoid (since endAlarmProcedure locks it)
+
         Serial.println("ALARM_ACTIVATED");
+    }
+
+    bool isActive() {
+        return isActivated & !isDeactivated;
     }
 
     void logDateTime() {
@@ -280,8 +311,7 @@ class MainSession {
       }
     }
 
-    void readPin() {
-      delay(250);
+    bool readPin() {
       if (Serial.available() > 0) {
         String receivedPIN = Serial.readStringUntil('\n');
         receivedPIN.trim(); // remove newline and spaces
@@ -289,14 +319,72 @@ class MainSession {
         if (receivedPIN == correctPIN) {
           Serial.println("ACCESS GRANTED");
           digitalWrite(LED_BUILTIN, HIGH); // Turn on LED
+          return true;
         } else {
           Serial.println("ACCESS DENIED");
           digitalWrite(LED_BUILTIN, LOW);  // Turn off LED
+          return false;
         }
       }
+
+      return false;
   }
 
-  
+  void changePIN(String newPin) {
+    correctPIN = newPin;
+  }
+
+  String waitForMATLAB() {
+    String command = "";
+
+    // Wait until something is available
+    while (Serial.available() == 0) {
+      // Optionally add timeout logic
+      delay(10);
+    }
+
+    command = Serial.readStringUntil('\n');  // Waits for newline character
+    command.trim();                          // Remove leading/trailing spaces
+    return command;
+  }  
+
+  void turnOnLED(int ledIndex) {
+        leds[ledIndex].turnOn(); 
+    }
+
+  void openSettingsMenu() {
+
+    bool selectionMade = false;
+
+    while (!selectionMade) {
+      if (Serial.available()) {
+        String input = Serial.readStringUntil('\n');
+        input.trim();
+
+        switch (input.toInt()) {
+          case 1:
+              selectionMade = true;              
+              turnOnLED(1); 
+              delay(10000);  
+              activateAllSensors();
+            break;
+
+          case 2:            
+            turnOnLED(1); 
+            selectionMade = true;
+            delay(1000);  
+            deactivateAllSensors();
+            break; 
+
+          default:
+            turnOnLED(1); 
+            break;
+        }
+      }
+
+      delay(10);
+    }
+  }
 };
 
 MainSession alarmSession;
@@ -305,34 +393,78 @@ void setup() {
   // Optional: configure pitch, volume, and duration
   Serial.begin(9600);
   pinMode(LED_BUILTIN, OUTPUT);
-  alarmSession.activateAllSensors();
+  alarmSession.deactivateAllSensors();
 }
 
 void loop() {
-  if (alarmSession.checkForFace()) {
-    digitalWrite(LED_BUILTIN, HIGH); // Turn on LED
-    alarmSession.deactivateAllSensors();   
+  /*Serial.println("ALARM_DEACTIVATED");
+  Serial.println("Enter a choice:");
+  Serial.println("1 - Change PIN");
+  Serial.println("2 - Arm the System"); */
 
-    unsigned long startTime = millis();
-    bool messageReceived = false;
+  bool selectionMade = false;
 
-    while (millis() - startTime < 60000) { // 60,000 ms = 60 seconds      
-        alarmSession.readPin();
-    }
+  while (!selectionMade) {
+      // Check for incoming serial data
+      if (Serial.available()) {
+          String input = Serial.readStringUntil('\n');
+          input.trim();
 
-    alarmSession.activateAllSensors();   
-  }   
-  else {
-    if (alarmSession.readSensors()) {
-      alarmSession.triggerAlarmProcedure();
-      delay(250);  // optional throttle
-    }
-    else {
-      alarmSession.endAlarmProcedure();
-      delay(250);  // optional throttle
-      alarmSession.activateAllSensors();
-      delay(250);  // optional throttle   
-    }  
+          if (input == "1") {
+              Serial.println("Enter new PIN:");
+              while (Serial.available() == 0) {
+                delay(10);
+              }
+              String newPin = Serial.readStringUntil('\n');
+              newPin.trim();
+
+              alarmSession.changePIN(newPin);
+              selectionMade = true;
+          } else if (input == "2") {              
+              selectionMade = true;              
+              alarmSession.turnOnLED(1); 
+              delay(10000);   
+              alarmSession.activateAllSensors();          
+          } else {
+              Serial.println("Invalid option. Please enter 1 or 2.");
+          }
+      }
+
+      delay(10); // Small delay to prevent tight loop
   }
 
+  while (alarmSession.isActive()) {
+      if (alarmSession.checkForFace() == true) {         
+        alarmSession.deactivateAllSensors();  
+
+        unsigned long startTime = millis();
+        bool messageReceived = false;
+
+        while ((!messageReceived) & (millis() - startTime < 30000)) { // 60,000 ms = 60 seconds 
+            alarmSession.turnOnLED(2);    
+            messageReceived = alarmSession.readPin();
+            delay(250);
+
+            if (messageReceived) {
+              delay(2000);
+            }
+        }
+
+        alarmSession.turnOnLED(0);  
+        if (!messageReceived) {
+            alarmSession.activateAllSensors(); 
+        }
+        else {
+          alarmSession.openSettingsMenu();
+        }          
+      }   
+      else {
+        if (alarmSession.readSensors()) {
+          alarmSession.triggerAlarmProcedure();
+          delay(250);  // optional throttle
+        }
+        else {
+        }  
+      }
+  }
 }

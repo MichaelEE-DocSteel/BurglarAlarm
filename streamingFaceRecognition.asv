@@ -85,6 +85,11 @@ elseif refreshOption == 2
 elseif refreshOption == 3
 	% Use as is--no validation of capture!
 	validateCapturedImages = false;
+elseif refreshOption == 4
+    deleteUserFolder();
+    return
+
+
 elseif isempty(refreshOption)
 	delete(vidObj)
 	return
@@ -161,7 +166,7 @@ end
 %%% Capture is done. Now for TRAINING:
 imgSet = imageSet(targetDirectory,'recursive');
 if numel(imgSet) < 2
-	error('streamingFaceRecognition: You must capture at least two individuals for this to work!');
+    verified = streamingFaceRecognition(8,0.1, option)
 end
 if refreshOption ~= 3
 	queryForNames;
@@ -173,14 +178,17 @@ sceneFeatures = trainStackedFaceDetector(imgSet);
 
 score = 0;
 verified = false;
+faceDetected = false;
+a = annotation('textbox', [0.15, 0.85, 0.3, 0.1]);
 
 %%% Okay, so now we should have a recognizer in place!!!
-figure(fdrFig)
+f = figure(fdrFig);
 while double(get(fdrFig,'currentCharacter')) ~= 27 && ~isDone && (score < 20)
 	bestGuess = '?';
 	RGBFrame = snapshot(vidObj);
 	grayFrame = rgb2gray(RGBFrame);
 	bboxes = faceDetector.step(grayFrame);
+    faceDetected = false;
 	for jj = 1:size(bboxes,1)%#ok
 		if all(bboxes(jj,3:4) >= QC.minBBSize)
 			thisFace = imcrop(grayFrame,bboxes(jj,:));
@@ -197,22 +205,23 @@ while double(get(fdrFig,'currentCharacter')) ~= 27 && ~isDone && (score < 20)
 			bestGuess = myPrediction(thisFace,sceneFeatures,numel(imgSet));
 			if bestGuess == 0
 				bestGuess = 'None';
-                
                 score = score - 1;
 			else
 				bestGuess = imgSet(bestGuess).Description;
                 score = score + 1;
             end
-            faceDetected = true
+            faceDetected = true;
             disp(score)
 			%tPredict = toc
 			RGBFrame = 	insertObjectAnnotation(RGBFrame, 'rectangle', bboxes(jj,:), bestGuess,'FontSize',48);
-        else
-            faceDetected = false;
 		end
 	end
 	imshow(RGBFrame,'parent',imgAx);drawnow;
-	title(["Face detected: " bestGuess == 0 bestGuess ])
+	%text(f, 'Name', "Face detected: "+ faceDetected+ " User: "+ bestGuess +" Score:" +score+ "/20");
+    delete(a);
+    a = annotation('textbox', [0.15, 0.85, 0.3, 0.1], ...
+        'String', sprintf("Face detected: "+ faceDetected+ " \nUser: "+ bestGuess +" \nScore:" +score+ "/20"), ...
+        'FontSize', 16);
 end %while
 
 verified = true;
@@ -402,5 +411,41 @@ return
 			delete(f);
 		end %registerSelection (subfunction of validateCaptured)
 	end %validateCaptured
+
+
+
+function deleteUserFolder()
+    rootDir = targetDirectory;
+    userFolders = dir(rootDir);
+    userFolders = userFolders([userFolders.isdir]); % Only keep directories
+    userFolders = userFolders(~ismember({userFolders.name}, {'.', '..'})); % Remove '.' and '..'
+    folderNames = {userFolders.name};
+    fig = uifigure('Name', 'Delete User Folder', 'Position', [500 500 300 150]);
+    dd = uidropdown(fig, ...
+        'Position', [75 75 150 22], ...
+        'Items', folderNames, ...
+        'Placeholder', 'Select User Folder');
+    btn = uibutton(fig, 'Position', [100 30 100 30], 'Text', 'Delete Folder');
+    btn.ButtonPushedFcn = @(btn, event) deleteFolder(dd, rootDir);
+end
+
+function deleteFolder(dd, rootDir)
+    selectedFolder = dd.Value;
+    if isempty(selectedFolder)
+        uialert(gcf, 'No folder selected!', 'Error');
+        return;
+    end
+    folderPath = fullfile(rootDir, selectedFolder);
+    choice = questdlg(['Are you sure you want to delete the folder: ', selectedFolder], ...
+        'Confirm Deletion', 'Yes', 'No', 'No');
+    if strcmp(choice, 'Yes')
+        try
+            rmdir(folderPath, 's');
+            %uialert(gcf, ['Folder "', selectedFolder, '" deleted successfully.'], 'Success');
+        catch
+            %uialert(gcf, 'Error deleting folder. Please check permissions.', 'Error');
+        end
+    end
+end
 
 end
