@@ -1,4 +1,4 @@
-function streamingFaceRecognition(nOfEach,pauseval, option)
+function [verified] = streamingFaceRecognition(nOfEach,pauseval, option)
 % streamingFaceRecognition(nOfEach,pauseval)
 %
 % Demonstrates live acquisition, detection, training, and recognition of
@@ -60,76 +60,35 @@ targetDirectory = fullfile(fileparts(which(mfilename)),'AutoCapturedFaces');
 validateCapturedImages = true;
 personNumber = 1;
 dirExists = exist(targetDirectory,'dir') == 7;
-
-if nargin < 3
-    option =  0;
-end
-
-userTable = readtable('users.csv')
-% if isempty(userTable)
-%     userTable = table("Person", 1);
-%     writetable(userTable, "users.csv");
-%     writetable(table("Person", 1), "users.csv");
-% end
-
-if option == 0
-
-    if dirExists
-	    prompt = sprintf('Would you like to:\n\nSTART OVER (Clears Existing Data!!)\nAdd Face(s) to recognition set\nor Use recognition set as is?');
-	    refresh = questdlg(prompt,'Face Recognition Options','START OVER','Add Face(s)','Use as is','START OVER');
-	    refreshOption = find(ismember({'START OVER','Add Face(s)','Use as is'},refresh));
-    else
-	    mkdir(targetDirectory);
-	    refreshOption = 1;
-    end
-
-else 
+if dirExists && nargin < 3
+	prompt = sprintf('Would you like to:\n\nSTART OVER (Clears Existing Data!!)\nAdd Face(s) to recognition set\nor Use recognition set as is?');
+	refresh = questdlg(prompt,'Face Recognition Options','START OVER','Add Face(s)','Use as is','START OVER');
+	refreshOption = find(ismember({'START OVER','Add Face(s)','Use as is'},refresh));
+elseif ~(nargin < 3)
     refreshOption = option;
+elseif ~dirExists
+	mkdir(targetDirectory);
+	refreshOption = 1;
 end
-
-
 
 if refreshOption == 1
-	rmdir(targetDirectory,'s');  %% Remove all
+	rmdir(targetDirectory,'s');
 	mkdir(targetDirectory)
 	mkdir(fullfile(targetDirectory,filesep,['Person' num2str(1)]))
 	personNumber = 1;
-
-    writetable(table("Person", 1), "users.csv");
-
 elseif refreshOption == 2
 	tmp = dir(targetDirectory);
 	fcn = @(x)ismember(x,{'.','..'});
 	tmp = cellfun(fcn,{tmp.name},'UniformOutput',false);
-	%personNumber = nnz(~[tmp{:}])+1;
-    personNumber = userTable(end, 2).Var2(1)
+	personNumber = nnz(~[tmp{:}])+1;
 	mkdir(fullfile(targetDirectory,filesep,['Person' num2str(personNumber)]))
-
-    userTable = [userTable; {"Person", personNumber + 1}]
-    writetable(userTable, "users.csv");
-
-
 elseif refreshOption == 3
-    personNumber = userTable(end, 1);
-
-    folderToDelete = fullfile(targetDirectory, ['Person' num2str(personNumber)]);
-    if exist(folderToDelete, 'dir')
-        rmdir(folderToDelete, 's');
-    end
-
-    userTable(end,:) = [];
-    writetable(userTable, "users.csv");
-
-elseif refreshOption == 4
-    	% Use as is--no validation of capture!
+	% Use as is--no validation of capture!
 	validateCapturedImages = false;
-
 elseif isempty(refreshOption)
 	delete(vidObj)
 	return
 end
-
-
 
 %%% FIGURE
 fdrFig = figure('windowstyle','normal',...
@@ -202,9 +161,7 @@ end
 %%% Capture is done. Now for TRAINING:
 imgSet = imageSet(targetDirectory,'recursive');
 if numel(imgSet) < 2
-    close all force ;
-	disp('streamingFaceRecognition: You must capture at least two individuals for this to work!');
-    input();
+	error('streamingFaceRecognition: You must capture at least two individuals for this to work!');
 end
 if refreshOption ~= 3
 	queryForNames;
@@ -214,20 +171,16 @@ if validateCapturedImages
 end
 sceneFeatures = trainStackedFaceDetector(imgSet);
 
+score = 0;
+verified = false;
+
 %%% Okay, so now we should have a recognizer in place!!!
 figure(fdrFig)
-% for i = 1:10
-%     h(i) = text(0,0,'','Color','red','FontSize',28);
-%     g(i) = plot(1,1,'r');
-% end
-
-while double(get(fdrFig,'currentCharacter')) ~= 27 && ~isDone
-    
+while double(get(fdrFig,'currentCharacter')) ~= 27 && ~isDone && (score < 20)
 	bestGuess = '?';
 	RGBFrame = snapshot(vidObj);
 	grayFrame = rgb2gray(RGBFrame);
 	bboxes = faceDetector.step(grayFrame);
-    imshow(RGBFrame,'parent',imgAx);
 	for jj = 1:size(bboxes,1)%#ok
 		if all(bboxes(jj,3:4) >= QC.minBBSize)
 			thisFace = imcrop(grayFrame,bboxes(jj,:));
@@ -243,41 +196,39 @@ while double(get(fdrFig,'currentCharacter')) ~= 27 && ~isDone
 			%tic;
 			bestGuess = myPrediction(thisFace,sceneFeatures,numel(imgSet));
 			if bestGuess == 0
-				bestGuess = '?';
+				bestGuess = 'None';
+                
+                score = score - 1;
 			else
 				bestGuess = imgSet(bestGuess).Description;
-			end
+                score = score + 1;
+            end
+            faceDetected = true
+            disp(score)
 			%tPredict = toc
-			% RGBFrame = 	insertObjectAnnotation(RGBFrame, 'rectangle', bboxes(jj,:), bestGuess,'FontSize',48);
-            h(jj) = text(bboxes(jj,1), bboxes(jj,2), bestGuess,'Color','red','FontSize',20);
-            h(jj).Position(1:2) = bboxes(jj,1:2) - [0,20];
-            h(jj).String = bestGuess;
-            
-            x = bboxes(jj,1) - [0;
-                                -bboxes(jj,3);
-                                -bboxes(jj,3);
-                                0;
-                                0];
-            y = bboxes(jj,2) + [0;
-                                0;
-                                +bboxes(jj,4);
-                                +bboxes(jj,4);
-                                0];
-            hold on
-            g(jj) = plot(x,y, 'r');
-                            
+			RGBFrame = 	insertObjectAnnotation(RGBFrame, 'rectangle', bboxes(jj,:), bestGuess,'FontSize',48);
+        else
+            faceDetected = false;
 		end
 	end
-% 	imshow(RGBFrame,'parent',imgAx);drawnow;
-    drawnow;
-	title([bestGuess '?'])
+	imshow(RGBFrame,'parent',imgAx);drawnow;
+	title(["Face detected: " bestGuess == 0 bestGuess ])
 end %while
+
+verified = true;
 
 %%% Clean up:
 delete(vidObj)
 release(faceDetector)
 delete(fdrFig)
 
+% Clear the webcam object if it exists
+if ~isempty(vidObj)
+    clear vidObj
+    vidObj = [];
+end
+
+return
 
 %%
 % NESTED SUBFUNCTIONS
@@ -332,9 +283,8 @@ delete(fdrFig)
 		% If we made it to here, the capture was successful!
 		success = true;
 		% Update displayFrame
-% 		displayFrame = insertShape(RGBFrame, 'Rectangle', bboxes,...
-% 			'linewidth',4,'color','cyan');
-        
+		displayFrame = insertShape(RGBFrame, 'Rectangle', bboxes,...
+			'linewidth',4,'color','cyan');
 		% SAVE
 		% Write to personN directory
 		bboxes = bboxes + [-bboxPad -bboxPad 2*bboxPad 2*bboxPad];
